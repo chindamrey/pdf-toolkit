@@ -146,9 +146,20 @@
                     <span class="sanitized-pill">✓ Auto-sanitized</span>
                 </div>
                 <div class="input-wrap">
-                    <input id="outputName" v-model="outputFileName" placeholder="example document123" type="text" />
+                    <input id="outputName" v-model="outputFileName" placeholder="example document123" type="text"
+                        autocomplete="off" @focus="showFileNameSuggestions = true" @click="showFileNameSuggestions = true"
+                        @blur="hideFileNameSuggestions" @keydown="handleOutputNameKeydown" />
                     <button class="input-clear" type="button" @click="outputFileName = ''"
                         aria-label="Clear filename">✕</button>
+                    <ul v-if="showFileNameSuggestions && outputNameSuggestions.length" class="filename-suggestions"
+                        role="listbox" aria-label="Suggested output filenames">
+                        <li v-for="(name, index) in outputNameSuggestions" :key="name" role="option"
+                            :aria-selected="index === activeSuggestionIndex" class="filename-suggestions__item"
+                            :class="{ 'filename-suggestions__item--active': index === activeSuggestionIndex }"
+                            @mousedown.prevent="selectOutputNameSuggestion(name)">
+                            {{ name }}
+                        </li>
+                    </ul>
                 </div>
                 <p class="output-hint">This name will be used when you download the merged file.</p>
             </div>
@@ -248,14 +259,11 @@ const IconDownload = svgIcon(['M12 3v12m0 0 4-4m-4 4-4-4', 'M5 19h14'])
 
 /* ---------------------------- source buttons ---------------------------- */
 const folderIcon = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></svg>'
-const driveIcon = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M8 3 3 12l3 6h10l3-6-5-9z"/></svg>'
-const dropboxIcon = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m6 3 6 4-6 4-6-4 6-4zm12 0-6 4 6 4 6-4-6-4zM6 11l6 4 6-4M6 19l6-4 6 4"/></svg>'
-const cloudIcon = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M7 18a4 4 0 0 1-.5-8 5 5 0 0 1 9.6-1.7A4.5 4.5 0 0 1 17 18H7z"/></svg>'
 
 const fileInput = ref(null)
 const isDragging = ref(false)
 const dragIndex = ref(null)
-
+const fileName = ref([])
 const triggerFilePicker = () => fileInput.value?.click()
 
 const sources = [
@@ -290,6 +298,8 @@ const addFiles = async (fileList) => {
     const pdfFiles = Array.from(fileList || []).filter((f) =>
         f.type === 'application/pdf' || f.name.toLowerCase().endsWith('.pdf')
     )
+
+    fileName.value.push(...pdfFiles.map((file) => file.name))
 
     await Promise.all(pdfFiles.map(async (f) => {
         const queueItem = reactive({
@@ -331,6 +341,7 @@ const addFiles = async (fileList) => {
 }
 
 const onFilePicked = (e) => {
+    console.log('file input : ',e);
     void addFiles(e.target.files)
     e.target.value = ''
 }
@@ -340,9 +351,14 @@ const onDrop = (e) => {
 }
 
 const removeFile = (id) => {
+    const removedFile = files.value.find((file) => file.id === id)
     files.value = files.value.filter((f) => f.id !== id)
+    if (removedFile) fileName.value = fileName.value.filter((name) => name !== removedFile.name)
 }
-const clearQueue = () => (files.value = [])
+const clearQueue = () => {
+    files.value = []
+    fileName.value = []
+}
 const reverseOrder = () => (files.value = [...files.value].reverse())
 const sortAlpha = () => (files.value = [...files.value].sort((a, b) => a.name.localeCompare(b.name)))
 
@@ -378,6 +394,40 @@ const formatMb = (n) => `${n.toFixed(1)} MB`
 
 /* ------------------------------- form fields ------------------------------ */
 const outputFileName = ref('')
+const showFileNameSuggestions = ref(false)
+const activeSuggestionIndex = ref(0)
+const outputNameSuggestions = computed(() => {
+    const query = outputFileName.value.trim().toLowerCase()
+    return [...new Set(fileName.value.map((name) => name.replace(/\.pdf$/i, '')))]
+        .filter((name) => !query || name.toLowerCase().includes(query))
+})
+
+const selectOutputNameSuggestion = (name) => {
+    outputFileName.value = name
+    showFileNameSuggestions.value = false
+}
+
+
+const hideFileNameSuggestions = () => {
+    window.setTimeout(() => (showFileNameSuggestions.value = false), 100)
+}
+
+const handleOutputNameKeydown = (event) => {
+    const suggestions = outputNameSuggestions.value
+    if (!suggestions.length) return
+
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+        event.preventDefault()
+        showFileNameSuggestions.value = true
+        const direction = event.key === 'ArrowDown' ? 1 : -1
+        activeSuggestionIndex.value = (activeSuggestionIndex.value + direction + suggestions.length) % suggestions.length
+    } else if (event.key === 'Enter' && showFileNameSuggestions.value) {
+        event.preventDefault()
+        selectOutputNameSuggestion(suggestions[activeSuggestionIndex.value] || suggestions[0])
+    } else if (event.key === 'Escape') {
+        showFileNameSuggestions.value = false
+    }
+}
 const isMerging = ref(false)
 const mergeError = ref('')
 const previewUrl = ref('')
@@ -399,6 +449,7 @@ const downloadPreview = () => {
 }
 
 const mergeFiles = async () => {
+    console.log('File name : ',fileName.value);
     const validFiles = files.value.filter((file) => file.source && !file.excluded && file.status.label === 'Ready')
     if (!validFiles.length) {
         mergeError.value = 'Add at least one valid PDF before merging.'
@@ -993,6 +1044,36 @@ kbd {
 
 .input-wrap {
     position: relative;
+}
+
+.filename-suggestions {
+    position: absolute;
+    z-index: 5;
+    top: calc(100% + 4px);
+    right: 0;
+    left: 0;
+    max-height: 180px;
+    margin: 0;
+    padding: 4px;
+    overflow-y: auto;
+    list-style: none;
+    border: 1px solid var(--color-border);
+    border-radius: 8px;
+    background: var(--color-background);
+    box-shadow: 0 8px 18px color-mix(in srgb, #000 14%, transparent);
+}
+
+.filename-suggestions__item {
+    padding: 8px 10px;
+    border-radius: 5px;
+    color: var(--ink);
+    cursor: pointer;
+    font-size: 12.5px;
+}
+
+.filename-suggestions__item:hover,
+.filename-suggestions__item--active {
+    background: var(--color-accent);
 }
 
 .input-wrap input {
