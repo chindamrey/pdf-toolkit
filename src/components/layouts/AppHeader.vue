@@ -148,7 +148,6 @@ onBeforeUnmount(() => window.removeEventListener('resize', handleResize))
     display: flex;
     align-items: baseline;
     gap: 8px;
-    font-family: 'Fraunces', Georgia, serif;
     font-size: 21px;
     font-weight: 600;
     color: var(--ink);
