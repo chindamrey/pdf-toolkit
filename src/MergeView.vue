@@ -224,7 +224,10 @@
                     <IconClose />
                 </button>
             </header>
-            <iframe class="preview-frame" :src="previewUrl" :title="`Preview of ${previewFileName}`"></iframe>
+            <div class="preview-frame preview-pages" :aria-label="`Preview of ${previewFileName}`">
+                <img v-for="(page, index) in previewPages" :key="index" :src="page"
+                    :alt="`Page ${index + 1} of ${previewFileName}`" />
+            </div>
             <footer class="preview-modal__footer">
                 <button class="preview-cancel" type="button" @click="closePreview">Cancel</button>
                 <button class="preview-download" type="button" @click="downloadPreview">
@@ -432,12 +435,36 @@ const isMerging = ref(false)
 const mergeError = ref('')
 const previewUrl = ref('')
 const previewFileName = ref('')
+const previewPages = ref([])
 const previewCountdown = ref(0)
+
+const renderPreviewPages = async (pdfBytes) => {
+    const { getDocument, GlobalWorkerOptions } = await import('pdfjs-dist')
+    if (!thumbnailWorker) thumbnailWorker = new PdfThumbnailWorker()
+    GlobalWorkerOptions.workerPort = thumbnailWorker
+
+    const pdf = await getDocument({ data: new Uint8Array(pdfBytes) }).promise
+    const pages = []
+    for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber++) {
+        const page = await pdf.getPage(pageNumber)
+        const viewport = page.getViewport({ scale: 1.5 })
+        const canvas = document.createElement('canvas')
+        const context = canvas.getContext('2d')
+        canvas.width = Math.ceil(viewport.width)
+        canvas.height = Math.ceil(viewport.height)
+        await page.render({ canvas, canvasContext: context, viewport }).promise
+        pages.push(canvas.toDataURL('image/jpeg', 0.9))
+        page.cleanup()
+    }
+    pdf.cleanup()
+    return pages
+}
 
 const closePreview = () => {
     if (previewUrl.value) URL.revokeObjectURL(previewUrl.value)
     previewUrl.value = ''
     previewFileName.value = ''
+    previewPages.value = []
 }
 
 const downloadPreview = () => {
@@ -471,9 +498,11 @@ const mergeFiles = async () => {
             .replace(/[<>:"/\\|?*\x00-\x1F]/g, '-')
             .replace(/\.pdf$/i, '') || 'merged-document'
         const bytes = await mergedPdf.save()
-       
+        const renderedPages = await renderPreviewPages(bytes)
+
         closePreview()
         previewFileName.value = `${filenameBase}.pdf`
+        previewPages.value = renderedPages
         previewUrl.value = URL.createObjectURL(
             new Blob([bytes], { type: 'application/pdf' })
         )
@@ -1442,6 +1471,23 @@ kbd {
     background: var(--color-accent);
 }
 
+.preview-pages {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 14px;
+    overflow-y: auto;
+    padding: 16px;
+}
+
+.preview-pages img {
+    display: block;
+    width: min(100%, 720px);
+    height: auto;
+    background: #fff;
+    box-shadow: 0 2px 10px rgba(7, 5, 12, 0.16);
+}
+
 .preview-modal__footer {
     justify-content: flex-end;
     border-top: 1px solid var(--color-border);
@@ -1493,6 +1539,11 @@ kbd {
     .preview-modal__header,
     .preview-modal__footer {
         padding: 14px;
+    }
+
+    .preview-pages {
+        gap: 10px;
+        padding: 10px;
     }
 }
 
